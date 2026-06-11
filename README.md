@@ -49,7 +49,7 @@ No internet required. No data leaves your machine. Just speak and type.
 
 ### ✨ New Features
 
-- **Remote API speech recognition engine** — Configure Vocalinux to use compatible remote transcription services while keeping existing local engines available (#335)
+- **Remote API speech recognition engine** — Configure Vocalinux to use compatible remote transcription services, including whisper.cpp, OpenAI-compatible, and chat-completions audio servers, while keeping existing local engines available (#335)
 - **Silero VAD** — Neural voice activity detection filters silence-only buffers for cleaner recognition when ONNX Runtime support is installed (#447)
 
 ### 🐛 Bug Fixes
