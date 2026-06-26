@@ -108,8 +108,11 @@ class FirstRunDialog(Gtk.Dialog):
     def do_response(self, response_id):
         """Handle dialog response - override default handler to set result."""
         self.result = self._response_map.get(response_id, None)
-        # Call parent to actually close the dialog
-        Gtk.Dialog.do_response(self, response_id)
+        # NOTE: do NOT chain up to Gtk.Dialog.do_response here. On some
+        # PyGObject/GTK builds `response` is exposed only as a signal, not as
+        # an invokable class vfunc, so chaining up raises
+        # "Class GtkDialog doesn't implement response". The caller drives the
+        # dialog via run() + destroy(), so the default handler is not needed.
 
 
 def show_first_run_dialog(parent: Optional[Gtk.Window] = None) -> Optional[str]:
