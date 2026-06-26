@@ -61,6 +61,8 @@ No internet required. No data leaves your machine. Just speak and type.
 - **Models**: Correct whisper.cpp and VOSK download size metadata (#453)
 - **Startup**: Allow launch without the pynput backend (#448)
 - **Website**: Clarify speech demo browser support (#449)
+- **Installer**: Preserve `GI_TYPELIB_PATH`/`LD_LIBRARY_PATH` across the `sg input` group elevation so native libraries (e.g. whisper.cpp) still resolve after the group switch; collect all `girepository` dirs for cross-distro typelib detection
+- **UI**: Avoid a `GtkDialog` `response` vfunc chain-up that crashed the first-run dialog on some PyGObject/GTK builds
 
 ### 🔧 Improvements
 
@@ -319,6 +321,10 @@ pytest
 # Run from source with debug
 python -m vocalinux.main --debug
 ```
+
+> 📝 See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for development notes —
+> editable-install requirements, a Python 3.14 test caveat, and how the `sg
+> input` launcher elevation preserves library paths.
 
 ## 📁 Project Structure
 
