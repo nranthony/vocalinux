@@ -938,12 +938,13 @@ get_engine_recommendation() {
 
 # Detect GI_TYPELIB_PATH for cross-distro compatibility
 detect_typelib_path() {
+    local paths=""
+
     # Try pkg-config first (most reliable)
     if command -v pkg-config >/dev/null 2>&1; then
-        local path=$(pkg-config --variable=typelibdir gobject-introspection-1.0 2>/dev/null)
-        if [ -n "$path" ] && [ -d "$path" ]; then
-            echo "$path"
-            return 0
+        local pkg_path=$(pkg-config --variable=typelibdir gobject-introspection-1.0 2>/dev/null)
+        if [ -n "$pkg_path" ] && [ -d "$pkg_path" ]; then
+            paths="$pkg_path"
         fi
     fi
 
@@ -961,10 +962,18 @@ detect_typelib_path() {
         /usr/local/lib/girepository-1.0 \
         /usr/local/lib64/girepository-1.0; do
         if [ -d "$path" ]; then
-            echo "$path"
-            return 0
+            if [ -z "$paths" ]; then
+                paths="$path"
+            elif [[ ":$paths:" != *":$path:"* ]]; then
+                paths="$paths:$path"
+            fi
         fi
     done
+
+    if [ -n "$paths" ]; then
+        echo "$paths"
+        return 0
+    fi
 
     # Ultimate fallback - will cause issues if wrong, but at least we try
     echo "/usr/lib/girepository-1.0"
@@ -3114,7 +3123,8 @@ fi
 # Check if user is in input group but current session doesn't have it
 if grep -q "^input:.*\b\$(whoami)\b" /etc/group 2>/dev/null && ! groups | grep -q '\binput\b'; then
     # Use sg to run with input group without requiring logout
-    exec sg input -c "$VENV_DIR/bin/vocalinux \$*"
+    # Explicitly pass environmental variables inside the sg shell because sg resets env
+    exec sg input -c "GI_TYPELIB_PATH=\"\$GI_TYPELIB_PATH\" LD_LIBRARY_PATH=\"\$LD_LIBRARY_PATH\" \"$VENV_DIR/bin/vocalinux\" \$*"
 else
     exec "$VENV_DIR/bin/vocalinux" "\$@"
 fi
@@ -3159,7 +3169,8 @@ fi
 # Check if user is in input group but current session doesn't have it
 if grep -q "^input:.*\b\$(whoami)\b" /etc/group 2>/dev/null && ! groups | grep -q '\binput\b'; then
     # Use sg to run with input group without requiring logout
-    exec sg input -c "$VENV_DIR/bin/vocalinux-gui \$*"
+    # Explicitly pass environmental variables inside the sg shell because sg resets env
+    exec sg input -c "GI_TYPELIB_PATH=\"\$GI_TYPELIB_PATH\" LD_LIBRARY_PATH=\"\$LD_LIBRARY_PATH\" \"$VENV_DIR/bin/vocalinux-gui\" \$*"
 else
     exec "$VENV_DIR/bin/vocalinux-gui" "\$@"
 fi
