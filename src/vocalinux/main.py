@@ -214,6 +214,17 @@ def check_appindicator_support():
 
 def main():
     """Main entry point for the application."""
+    # Set the program name before any GLib/GTK usage so the Wayland app_id
+    # (and X11 WM_CLASS) matches vocalinux.desktop, letting the desktop shell
+    # associate our windows with the installed icon.
+    try:
+        from gi.repository import GLib
+
+        GLib.set_prgname("vocalinux")
+    except ImportError:
+        # Missing gi is reported with a helpful message by check_dependencies()
+        pass
+
     # Check for single instance BEFORE any initialization
     from . import single_instance
 
@@ -269,6 +280,11 @@ def main():
         logger.warning("After installing, log out and back in (or restart GNOME Shell).")
 
     # Now it's safe to import GTK-dependent modules
+    from gi.repository import Gtk
+
+    # Fallback icon for any window/dialog that doesn't set its own
+    Gtk.Window.set_default_icon_name("vocalinux")
+
     from .common_types import RecognitionState
     from .speech_recognition import recognition_manager
     from .text_injection import text_injector

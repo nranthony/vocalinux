@@ -6,6 +6,7 @@ Comment=Seamless voice dictation system for Linux
 GenericName=Voice Typing
 Exec=vocalinux
 Icon=vocalinux
+StartupWMClass=vocalinux
 Terminal=false
 Categories=Utility;Accessibility;AudioVideo;
 Keywords=voice;typing;dictation;speech;recognition;transcription;accessibility;
