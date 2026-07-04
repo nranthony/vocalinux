@@ -2896,8 +2896,12 @@ class SettingsDialog(Gtk.Dialog):
                         cancel_check_id = GLib.timeout_add(100, check_cancelled)
 
                         try:
-                            self._apply_settings_internal(settings)
-                            GLib.idle_add(download_dialog.set_complete, True, "")
+                            applied = self._apply_settings_internal(settings)
+                            GLib.idle_add(
+                                download_dialog.set_complete,
+                                applied,
+                                "" if applied else "Failed to apply settings",
+                            )
                             GLib.idle_add(self._populate_model_options)
                         finally:
                             GLib.source_remove(cancel_check_id)
@@ -2928,13 +2932,14 @@ class SettingsDialog(Gtk.Dialog):
 
             logger.info(f"Auto-applying settings: {settings}")
 
-            self._save_selected_settings(settings)
-
             was_running = self.speech_engine.state != RecognitionState.IDLE
             if was_running:
                 self.speech_engine.stop_recognition()
 
             self.speech_engine.reconfigure(**settings)
+            # Persist only after reconfigure succeeds so a failure doesn't
+            # leave the config pointing at settings that never took effect.
+            self._save_selected_settings(settings)
             logger.info("Settings auto-applied successfully")
         except Exception as e:
             logger.error(f"Failed to auto-apply settings: {e}")
@@ -3205,14 +3210,17 @@ For now, the engine has been reverted to VOSK."""
     def _apply_settings_internal(self, settings: dict) -> bool:
         """Internal method to apply settings."""
         try:
-            self._save_selected_settings(settings)
-
             was_running = self.speech_engine.state != RecognitionState.IDLE
             if was_running:
                 self.speech_engine.stop_recognition()
                 time.sleep(0.5)
 
             self.speech_engine.reconfigure(**settings)
+
+            # Persist only after reconfigure succeeds so a failed model
+            # download doesn't leave the config pointing at a model that
+            # isn't on disk (the previous working selection is kept).
+            self._save_selected_settings(settings)
 
             logger.info("Settings applied successfully.")
             return True
