@@ -456,6 +456,74 @@ def is_engine_process_running() -> bool:
         return False
 
 
+def _engine_pid_alive(pid: int) -> bool:
+    """True if pid is a live (non-zombie) engine process. A zombie child that
+    exited but hasn't been reaped still passes kill(pid, 0), but its
+    /proc cmdline reads empty."""
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    try:
+        cmdline = Path(f"/proc/{pid}/cmdline").read_text()
+    except OSError:
+        return False
+    return "ibus_engine.py" in cmdline
+
+
+def _find_engine_pids() -> list:
+    """Find all running Vocalinux IBus engine processes by cmdline, tracked or not."""
+    pids = []
+    for proc_dir in Path("/proc").iterdir():
+        if not proc_dir.name.isdigit():
+            continue
+        try:
+            cmdline = (proc_dir / "cmdline").read_text()
+        except OSError:
+            continue
+        if "ibus_engine.py" in cmdline and "vocalinux" in cmdline and "--xml" not in cmdline:
+            pid = int(proc_dir.name)
+            if pid != os.getpid():
+                pids.append(pid)
+    return pids
+
+
+def force_restart_engine_process() -> bool:
+    """
+    Kill every engine process (tracked or orphaned) and start a fresh one.
+
+    A live engine process is not proof of a usable injection socket: an engine
+    killed without cleanup leaves a socket file with no listener (connection
+    refused), while an older orphan may still listen on an unlinked inode that
+    clients can no longer reach. When the socket probe fails but
+    is_engine_process_running() claims otherwise, this is the only reliable
+    recovery.
+    """
+    stop_engine_process()
+
+    for pid in _find_engine_pids():
+        try:
+            os.kill(pid, signal.SIGTERM)
+            logger.info(f"Terminated stale IBus engine process (PID {pid})")
+        except OSError:
+            pass
+
+    deadline = time.time() + 2.0
+    while _find_engine_pids() and time.time() < deadline:
+        time.sleep(0.1)
+    for pid in _find_engine_pids():
+        try:
+            os.kill(pid, signal.SIGKILL)
+            logger.warning(f"Force-killed unresponsive IBus engine process (PID {pid})")
+        except OSError:
+            pass
+
+    if SOCKET_PATH.exists():
+        SOCKET_PATH.unlink()
+
+    return start_engine_process()
+
+
 def start_engine_process() -> bool:
     """
     Start the IBus engine process in the background.
@@ -530,6 +598,13 @@ def stop_engine_process() -> None:
                 return
 
         os.kill(pid, signal.SIGTERM)
+        for _ in range(20):
+            time.sleep(0.1)
+            if not _engine_pid_alive(pid):
+                break
+        else:
+            os.kill(pid, signal.SIGKILL)
+            logger.warning(f"IBus engine process (PID {pid}) ignored SIGTERM, sent SIGKILL")
         logger.info(f"IBus engine process (PID {pid}) stopped")
         PID_FILE.unlink()
     except (OSError, ValueError, FileNotFoundError) as e:
@@ -858,7 +933,15 @@ class IBusTextInjector:
         if not start_engine_process():
             raise IBusSetupError("Failed to start IBus engine process. Check logs for details.")
 
-        self._wait_for_engine_ready(require_active=False)
+        try:
+            self._wait_for_engine_ready(require_active=False)
+        except IBusSetupError:
+            # An engine process that exists but never answers the socket probe
+            # is a zombie (e.g. left over from a previous session); replace it.
+            logger.warning("IBus engine unresponsive, force-restarting engine process")
+            if not force_restart_engine_process():
+                raise
+            self._wait_for_engine_ready(require_active=False)
 
     def _setup_engine(self) -> None:
         """Install and activate the IBus engine."""
@@ -894,7 +977,14 @@ class IBusTextInjector:
                     "Try manually: ibus engine vocalinux"
                 )
 
-        self._wait_for_engine_ready()
+        try:
+            self._wait_for_engine_ready()
+        except IBusSetupError:
+            logger.warning("IBus engine unresponsive, force-restarting engine process")
+            if not force_restart_engine_process():
+                raise
+            switch_engine(ENGINE_NAME)
+            self._wait_for_engine_ready()
 
         # Restore the user's XKB layout immediately after engine activation.
         # Switching to the Vocalinux IBus engine can override the system
@@ -1071,7 +1161,9 @@ class IBusTextInjector:
                             "IBus engine refused connection on attempt "
                             f"{attempt + 1}/{max_attempts}: {e}. Retrying..."
                         )
-                        if not is_engine_process_running() and not restart_engine_process():
+                        # Refused means the socket file has no live listener;
+                        # a "running" engine process is a zombie here.
+                        if not force_restart_engine_process():
                             return False
                         time.sleep(0.2 * (attempt + 1))
                         continue
@@ -1083,7 +1175,9 @@ class IBusTextInjector:
                             "IBus engine socket disappeared on attempt "
                             f"{attempt + 1}/{max_attempts}; retrying..."
                         )
-                        if not is_engine_process_running() and not restart_engine_process():
+                        # No socket file while the process claims to run means
+                        # the engine's server thread is gone; replace the process.
+                        if not force_restart_engine_process():
                             return False
                         time.sleep(0.2 * (attempt + 1))
                         continue
@@ -1147,6 +1241,18 @@ def main():
     IBus.init()
     exec_by_ibus = "--ibus" in sys.argv
     app = VocalinuxEngineApplication(exec_by_ibus=exec_by_ibus)
+
+    # Without cleanup on termination the socket file outlives the process,
+    # and later clients get ECONNREFUSED from a listener-less socket.
+    def _shutdown(signum):
+        logger.info(f"Received signal {signum}, shutting down engine")
+        VocalinuxEngine.stop_socket_server()
+        app.mainloop.quit()
+        return GLib.SOURCE_REMOVE
+
+    GLib.unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGTERM, _shutdown, signal.SIGTERM)
+    GLib.unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGINT, _shutdown, signal.SIGINT)
+
     app.run()
     return 0
 
